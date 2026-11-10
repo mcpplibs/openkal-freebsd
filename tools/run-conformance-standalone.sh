@@ -4,7 +4,10 @@
 # `standalone', from working trees --- the specification, openkal-musl, and
 # this repository --- so that a change spanning them is examined as written.
 #
-#   run-conformance-standalone.sh <spec> <openkal-musl> <arch> <features>
+#   run-conformance-standalone.sh <spec> <openkal-musl> <arch> <features> [<openkal-llvm-runtime>]
+#
+# The suite is C++: its C++ runtime is openkal-llvm-runtime, built over
+# openkal-musl for the row, from the given tree or else the index.
 #
 # The suite's runner is OPENKAL_CONFORMANCE_RUNNER, as for run-conformance.sh.
 # The copies made here are in a temporary directory; nothing committed is
@@ -14,6 +17,8 @@ spec="$(cd "${1:?the specification}" && pwd)"
 musl="$(cd "${2:?openkal-musl}" && pwd)"
 arch="${3:?the architecture}"
 features="${4:?the suite features}"
+runtime="${5:-}"
+[ -z "$runtime" ] || runtime="$(cd "$runtime" && pwd)"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 cp -R "$spec/conformance" "$work/conformance"
@@ -36,6 +41,15 @@ grep -q "openkal-freebsd = { path = \"$here\"" "$m" || { echo "openkal-musl does
 c="$work/conformance/mcpp.toml"
 sed -i -E "s|^openkal = .*$|openkal = { path = \"$spec\" }\nopenkal-musl = { path = \"$work/musl\" }|" "$c"
 printf '\n[target.%s-freebsd-musl]\ntoolchain = "llvm@23.1.3"\n' "$arch" >> "$c"
+if [ -n "$runtime" ]; then
+    rt="$work/runtime"
+    cp -R "$runtime" "$rt"; rm -rf "$rt/target" "$rt/.git"
+    sed -i -E "s|^openkal-musl = \\{ version = \"[^\"]*\"|openkal-musl = { path = \"$work/musl\"|" "$rt/mcpp.toml"
+    grep -q "openkal-musl = { path = \"$work/musl\"" "$rt/mcpp.toml" || { echo "openkal-llvm-runtime does not name this openkal-musl" >&2; exit 1; }
+    printf '\n[target.'"'"'cfg(os = "freebsd")'"'"'.dependencies]\nopenkal-llvm-runtime = { path = "%s" }\n' "$rt" >> "$c"
+else
+    printf '\n[target.'"'"'cfg(os = "freebsd")'"'"'.dependencies]\nopenkal-llvm-runtime = "^0.20.1"\n' >> "$c"
+fi
 
 cd "$work/conformance"
 mcpp build --target "$arch-freebsd-musl" --features "$features"

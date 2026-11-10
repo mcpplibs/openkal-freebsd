@@ -34,7 +34,8 @@ jobs:
   # THE STANDALONE ARRANGEMENT is run the same way: openkal-musl over this
   # implementation with the feature `standalone', built for
   # `<arch>-freebsd-musl' from the working trees (tools/run-conformance-standalone.sh),
-  # openkal-musl at its branch of the same name when it has one.
+  # its C++ runtime openkal-llvm-runtime, each at its branch of the same name when
+  # it has one.
   conformance:
     name: conformance (freebsd ${{ matrix.arch }}, ${{ matrix.arrangement }})
     runs-on: ubuntu-24.04
@@ -101,14 +102,19 @@ jobs:
           mcpp --version
           features=full,exec,random,terminal,timeout,map,region
           if [ '${{ matrix.arrangement }}' = standalone ]; then
-            git clone --quiet https://github.com/mcpplibs/openkal-musl.git .musl
             branch='${{ github.head_ref || github.ref_name }}'
-            for b in "$branch" feat/freebsd; do
-              if git -C .musl rev-parse --verify --quiet "origin/$b" > /dev/null; then
-                git -C .musl checkout --quiet "origin/$b"; echo "openkal-musl is at $b"; break
-              fi
+            # openkal-musl and openkal-llvm-runtime (the suite's C and C++
+            # runtimes) at their branch of the same name, else feat/freebsd,
+            # else their default branch.
+            for repo in openkal-musl openkal-llvm-runtime; do
+              git clone --quiet "https://github.com/mcpplibs/$repo.git" ".$repo"
+              for b in "$branch" feat/freebsd; do
+                if git -C ".$repo" rev-parse --verify --quiet "origin/$b" > /dev/null; then
+                  git -C ".$repo" checkout --quiet "origin/$b"; echo "$repo is at $b"; break
+                fi
+              done
             done
-            bash tools/run-conformance-standalone.sh .spec .musl '${{ matrix.arch }}' "$features"
+            bash tools/run-conformance-standalone.sh .spec .openkal-musl '${{ matrix.arch }}' "$features" .openkal-llvm-runtime
           else
             bash .spec/tools/run-conformance.sh openkal-freebsd . "$features" \
               --target '${{ matrix.arch }}-freebsd' --platform "path:$GITHUB_WORKSPACE/ci/freebsd-platform"
