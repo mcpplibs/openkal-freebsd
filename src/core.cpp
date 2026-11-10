@@ -18,15 +18,21 @@ const char* variable(const char* name, unsigned long n) {
 
 namespace {
 
-// THE PROGRAM'S ARGUMENTS, AS ITS INITIALISERS ARE GIVEN THEM. FreeBSD's
+#ifndef OKF_STANDALONE
+// THE PROGRAM'S ARGUMENTS, AS ITS INITIALISERS ARE GIVEN THEM (hosted). FreeBSD's
 // run-time linker, and the start of a static program, call each function of
-// .init_array with (argc, argv, envp): the arrangement this implementation is
-// built for is one in which the program's own runtime received control.
+// .init_array with (argc, argv, envp): the program's own runtime received
+// control. Standalone, this implementation's start records them (start.cpp),
+// and the C library's start calls the initialisers with no arguments (musl's
+// `libc_start_init'): a function reading three here read what the registers
+// held, and the arguments it recorded over the start's were not pointers
+// (the conformance suite stopped with SIGBUS in its first `kal_env_arg').
 [[gnu::constructor(101)]] void record(int argc, char** argv, char** envp) {
     okf::g_argc = argc;
     okf::g_argv = argv;
     okf::g_envp = envp;
 }
+#endif
 
 kal_u64 ns_of(int clock) {
     okf::ktimespec t{};

@@ -31,16 +31,22 @@ jobs:
   # BOTH ARCHITECTURES. arm64 runs in an emulated machine (vmactions'
   # `arch: aarch64', without hardware assistance), which is why its job is
   # given longer.
+  # THE STANDALONE ARRANGEMENT is run the same way: openkal-musl over this
+  # implementation with the feature `standalone', built for
+  # `<arch>-freebsd-musl' from the working trees (tools/run-conformance-standalone.sh),
+  # openkal-musl at its branch of the same name when it has one.
   conformance:
-    name: conformance (freebsd ${{ matrix.arch }}, hosted)
+    name: conformance (freebsd ${{ matrix.arch }}, ${{ matrix.arrangement }})
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ matrix.minutes }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64,  minutes: 90 }
-          - { arch: aarch64, minutes: 240 }
+          - { arch: x86_64,  arrangement: hosted,     minutes: 90 }
+          - { arch: aarch64, arrangement: hosted,     minutes: 240 }
+          - { arch: x86_64,  arrangement: standalone, minutes: 90 }
+          - { arch: aarch64, arrangement: standalone, minutes: 240 }
     steps:
       - uses: actions/checkout@v4
 
@@ -93,9 +99,20 @@ jobs:
         run: |
           set -euo pipefail
           mcpp --version
-          bash .spec/tools/run-conformance.sh openkal-freebsd . \
-            full,exec,random,terminal,timeout,map,region \
-            --target '${{ matrix.arch }}-freebsd' --platform "path:$GITHUB_WORKSPACE/ci/freebsd-platform"
+          features=full,exec,random,terminal,timeout,map,region
+          if [ '${{ matrix.arrangement }}' = standalone ]; then
+            git clone --quiet https://github.com/mcpplibs/openkal-musl.git .musl
+            branch='${{ github.head_ref || github.ref_name }}'
+            for b in "$branch" feat/freebsd; do
+              if git -C .musl rev-parse --verify --quiet "origin/$b" > /dev/null; then
+                git -C .musl checkout --quiet "origin/$b"; echo "openkal-musl is at $b"; break
+              fi
+            done
+            bash tools/run-conformance-standalone.sh .spec .musl '${{ matrix.arch }}' "$features"
+          else
+            bash .spec/tools/run-conformance.sh openkal-freebsd . "$features" \
+              --target '${{ matrix.arch }}-freebsd' --platform "path:$GITHUB_WORKSPACE/ci/freebsd-platform"
+          fi
           file .deferred/openkal-conformance
 
       - name: The suite, run in FreeBSD
@@ -113,7 +130,7 @@ jobs:
         run: |
           set -euo pipefail
           log=.deferred/run.log
-          { echo '### openkal-freebsd conformance on FreeBSD (${{ matrix.arch }}, hosted)'; echo '```'; grep -E '^observations|DID NOT HOLD|^the implementation' "$log" | sort -u; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          { echo '### openkal-freebsd conformance on FreeBSD (${{ matrix.arch }}, ${{ matrix.arrangement }})'; echo '```'; grep -E '^observations|DID NOT HOLD|^the implementation' "$log" | sort -u; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           ! grep -q '^status ' "$log" || { echo "::error::the suite did not finish with status 0"; grep '^status ' "$log"; exit 1; }
           grep -qE '^observations: [0-9]+ held, 0 did not hold' "$log" || { echo "::error::an observation did not hold"; exit 1; }
 
