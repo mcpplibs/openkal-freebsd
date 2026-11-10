@@ -1,0 +1,4 @@
+#!/bin/sh
+# The conformance suite's runner on a Linux host: the program, run in the
+# FreeBSD virtual machine whose disk OKF_VM_IMAGE names (tools/vm-run.py).
+exec python3 "$(dirname "$0")/vm-run.py" --image "${OKF_VM_IMAGE:?the FreeBSD disk image}" -- "$@"

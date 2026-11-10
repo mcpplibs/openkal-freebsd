@@ -1,0 +1,165 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      mcpp_ref:
+        description: "build mcpp from this branch or tag of mcpp-community/mcpp"
+        required: false
+        default: ""
+
+env:
+  # THE ENGINE THAT KNOWS THE TARGET. `x86_64-freebsd' is a row of mcpp
+  # 2026.11.10.1. A run given `mcpp_ref' builds the engine from that branch or
+  # tag, with the released one as the compiler of that build.
+  MCPP_VERSION: 2026.11.10.1
+  MCPP_SOURCE_REF: ${{ github.event.inputs.mcpp_ref || '' }}
+  XLINGS_VERSION: v2026.10.26.1
+  XLINGS_NON_INTERACTIVE: '1'
+
+jobs:
+  # THE CONFORMANCE SUITE ON FREEBSD. Built on Linux for `x86_64-freebsd' above
+  # FreeBSD's own C library (the base system's sysroot, ci/freebsd-platform),
+  # and run in a FreeBSD virtual machine, as the system a user runs it on. The
+  # three-way check of the manifest, kal_interfaces() and the exported names is
+  # made on both sides: the exported names when the suite is built, the other
+  # two by the suite when it runs.
+  #
+  # BOTH ARCHITECTURES. arm64 runs in an emulated machine (vmactions'
+  # `arch: aarch64', without hardware assistance), which is why its job is
+  # given longer.
+  # THE STANDALONE ARRANGEMENT is run the same way: openkal-musl over this
+  # implementation with the feature `standalone', built for
+  # `<arch>-freebsd-musl' from the working trees (tools/run-conformance-standalone.sh),
+  # its C++ runtime openkal-llvm-runtime, each at its branch of the same name when
+  # it has one.
+  conformance:
+    name: conformance (freebsd ${{ matrix.arch }}, ${{ matrix.arrangement }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ matrix.minutes }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64,  arrangement: hosted,     minutes: 90 }
+          - { arch: aarch64, arrangement: hosted,     minutes: 240 }
+          - { arch: x86_64,  arrangement: standalone, minutes: 90 }
+          - { arch: aarch64, arrangement: standalone, minutes: 240 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The committed manifest names no local directory
+        run: |
+          set -euo pipefail
+          bad=$(grep -nE '^[a-z-]+ = \{[^}]*path = "(/|[A-Za-z]:)' mcpp.toml || true)
+          if [ -n "$bad" ]; then
+            echo "::error::the committed manifest names an absolute path"; printf '%s\n' "$bad"; exit 1
+          fi
+
+      - name: The specification
+        run: |
+          git clone --quiet https://github.com/mcpplibs/openkal.git .spec
+          branch='${{ github.head_ref || github.ref_name }}'
+          if git -C .spec rev-parse --verify --quiet "origin/$branch" > /dev/null; then
+            git -C .spec checkout --quiet "origin/$branch"
+            echo "the specification is at $branch"
+          else
+            echo "the specification has no $branch; its default branch is used"
+          fi
+
+      - name: Install xlings
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/openxlings/xlings/main/tools/other/quick_install.sh \
+            | bash -s "$XLINGS_VERSION"
+          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+
+      - name: Install mcpp
+        run: |
+          set -euo pipefail
+          xlings update
+          xlings install "mcpp@$MCPP_VERSION" -y -g
+          mcpp self config --mirror GLOBAL
+          if [ -n "${MCPP_SOURCE_REF:-}" ]; then
+            src="$RUNNER_TEMP/mcpp-src"
+            git clone --quiet --depth 1 --branch "$MCPP_SOURCE_REF" https://github.com/mcpp-community/mcpp.git "$src"
+            rm -f "$src/.xlings.json"
+            ( cd "$src" && mcpp build --release )
+            built=$(find "$src/target" -type f -name mcpp | head -1)
+            [ -n "$built" ] || { echo "::error::mcpp did not build from $MCPP_SOURCE_REF"; exit 1; }
+            echo "$(cd "$(dirname "$built")" && pwd)" >> "$GITHUB_PATH"
+            echo "under review: $("$built" --version) (from $MCPP_SOURCE_REF)"
+          fi
+
+      - name: The suite, built for FreeBSD
+        env:
+          OPENKAL_CONFORMANCE_RUNNER: ${{ github.workspace }}/tools/defer-runner
+          OKF_DEFERRED: ${{ github.workspace }}/.deferred
+        run: |
+          set -euo pipefail
+          mcpp --version
+          features=full,exec,random,terminal,timeout,map,region
+          if [ '${{ matrix.arrangement }}' = standalone ]; then
+            branch='${{ github.head_ref || github.ref_name }}'
+            # openkal-musl and openkal-llvm-runtime (the suite's C and C++
+            # runtimes) at their branch of the same name, else their default
+            # branch.
+            for repo in openkal-musl openkal-llvm-runtime; do
+              git clone --quiet "https://github.com/mcpplibs/$repo.git" ".$repo"
+              if git -C ".$repo" rev-parse --verify --quiet "origin/$branch" > /dev/null; then
+                git -C ".$repo" checkout --quiet "origin/$branch"; echo "$repo is at $branch"
+              fi
+            done
+            bash tools/run-conformance-standalone.sh .spec .openkal-musl '${{ matrix.arch }}' "$features" .openkal-llvm-runtime
+          else
+            bash .spec/tools/run-conformance.sh openkal-freebsd . "$features" \
+              --target '${{ matrix.arch }}-freebsd' --platform "path:$GITHUB_WORKSPACE/ci/freebsd-platform"
+          fi
+          file .deferred/openkal-conformance
+
+      - name: The suite, run in FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          arch: ${{ matrix.arch }}
+          usesh: true
+          run: |
+            set -e
+            uname -a
+            ./.deferred/run.sh > .deferred/run.log 2>&1 || echo "status $?" >> .deferred/run.log
+            cat .deferred/run.log
+
+      - name: The verdict
+        run: |
+          set -euo pipefail
+          log=.deferred/run.log
+          { echo '### openkal-freebsd conformance on FreeBSD (${{ matrix.arch }}, ${{ matrix.arrangement }})'; echo '```'; grep -E '^observations|DID NOT HOLD|^the implementation' "$log" | sort -u; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          ! grep -q '^status ' "$log" || { echo "::error::the suite did not finish with status 0"; grep '^status ' "$log"; exit 1; }
+          grep -qE '^observations: [0-9]+ held, 0 did not hold' "$log" || { echo "::error::an observation did not hold"; exit 1; }
+
+  # THE STANDALONE ARRANGEMENT, COMPILED FOR BOTH ARCHITECTURES from this
+  # package's sources and openkal's headers alone (tools/check-standalone.sh):
+  # no system header, no C library, and the objects carry the FreeBSD brand.
+  standalone:
+    name: standalone (compiled for x86_64 and aarch64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: The specification
+        run: git clone --quiet --depth 1 https://github.com/mcpplibs/openkal.git .spec
+      - name: Install xlings and mcpp
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/openxlings/xlings/main/tools/other/quick_install.sh \
+            | bash -s "$XLINGS_VERSION"
+          export PATH="$HOME/.xlings/subos/current/bin:$PATH"
+          xlings update
+          xlings install "mcpp@$MCPP_VERSION" -y -g
+          mcpp toolchain install llvm 23.1.3
+      - name: Every source, for both architectures
+        run: |
+          set -euo pipefail
+          cxx=$(find "$HOME/.mcpp" -path '*xim-x-llvm/23.1.3/bin/clang++' | head -1)
+          [ -n "$cxx" ] || { echo "::error::clang++ 23.1.3 was not found"; exit 1; }
+          bash tools/check-standalone.sh "$cxx" .spec/include

@@ -1,0 +1,72 @@
+[package]
+namespace   = "mcpplibs"
+name        = "openkal-freebsd"
+version     = "0.1.0"
+description = "An implementation of openkal for FreeBSD, written on the kernel's own system-call interface."
+license     = "Apache-2.0"
+authors     = ["mcpplibs"]
+repo        = "https://github.com/mcpplibs/openkal-freebsd"
+
+provides    = ["mcpp:kernel-abi=openkal"]
+
+# WHICH INTERFACES THIS IMPLEMENTATION PROVIDES, AND NO OTHER. An interface it
+# does not provide is absent: it is not in this list, not in kal_interfaces(),
+# and none of its names is defined (SPEC.md clause 6.1). The conformance
+# suite's three-way check compares this list with kal_interfaces() and with the
+# names the artefact exports.
+#
+# Absent in 0.1: openkal.space, openkal.net, openkal.datagram, openkal.prof and
+# openkal.debug.
+[kernel-abi]
+provides-interfaces = [
+    "openkal.abort",
+    "openkal.stream",
+    "openkal.memory",
+    "openkal.env",
+    "openkal.time",
+    "openkal.random",
+    "openkal.fs",
+    "openkal.process",
+    "openkal.task",
+    "openkal.exec",
+    "openkal.terminal",
+    "openkal.timeout",
+    "openkal.map",
+    "openkal.region",
+]
+
+[dependencies]
+openkal = "0.25.0"
+
+[build]
+sources = ["src/*.cpp"]
+# No exception propagates out of a C entry point, and nothing here is
+# identified at run time. The flags are attached to this package's sources;
+# the conformance tests are consumers.
+flags = [
+  { glob = "src/**", cxxflags = ["-fno-exceptions", "-fno-rtti"] },
+]
+
+# THE THREADS OF THE PROGRAM'S RUNTIME, which a context is in the hosted
+# arrangement (src/task.cpp): FreeBSD's own C library's rows. A row whose C
+# library is written above openkal (`*-freebsd-musl') has no libthr, and this
+# implementation is then standalone.
+[target.'cfg(all(os = "freebsd", not(env = "musl")))'.build]
+ldflags = ["-lthr"]
+
+[features]
+default = []
+
+# Whether this implementation is the whole of the program's environment.
+#
+# Ordinarily the program carries a runtime that has already received control
+# and creates its contexts --- FreeBSD's C library and libthr --- and this
+# implementation borrows both. That is the default.
+#
+# Where nothing in the program has received control --- the program supplies
+# its own runtime, or it is a C library written above openkal (openkal-musl) ---
+# this implementation does both: it begins the program (`_start', the image's
+# .note.tag brand, the thread pointer through sysarch) and creates contexts with
+# thr_new. That is what `standalone' selects, a statement about the program
+# that the consumer which knows it makes.
+standalone = { defines = ["OKF_STANDALONE"] }

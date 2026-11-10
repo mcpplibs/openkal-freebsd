@@ -1,0 +1,24 @@
+#!/bin/sh
+# The conformance suite's runner where the suite is built on one machine and
+# run on another: the program and the variables it is to be run with are put in
+# OKF_DEFERRED (a directory), with run.sh, which runs it there and answers as it
+# does. CI builds on Linux and runs run.sh in a FreeBSD virtual machine.
+set -eu
+out="${OKF_DEFERRED:?the directory the run is put in}"
+mkdir -p "$out"
+cp "$1" "$out/"
+program="./$(basename "$1")"
+shift
+{
+    echo '#!/bin/sh'
+    echo 'cd "$(dirname "$0")"'
+    env | grep -E '^(OPENKAL|KAL)_[A-Z0-9_]*=' | while IFS= read -r line; do
+        name=${line%%=*}; value=${line#*=}
+        printf "export %s='%s'\n" "$name" "$(printf '%s' "$value" | sed "s/'/'\\\\''/g")"
+    done
+    printf 'exec %s' "$program"
+    for a in "$@"; do printf " '%s'" "$(printf '%s' "$a" | sed "s/'/'\\\\''/g")"; done
+    echo
+} > "$out/run.sh"
+chmod +x "$out/run.sh" "$out/$(basename "$program")"
+echo "--- the suite is put in $out, to be run there by run.sh ---"
