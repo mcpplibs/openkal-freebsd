@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      mcpp_ref:
+        description: "build mcpp from this branch or tag of mcpp-community/mcpp"
+        required: false
+        default: ""
+
+env:
+  # THE ENGINE THAT KNOWS THE TARGET. `x86_64-freebsd' is a row of mcpp
+  # 2026.11.10.1; until it is released the engine is built from the branch that
+  # carries it, with the released one as the compiler of that build.
+  MCPP_VERSION: 2026.11.9.1
+  MCPP_SOURCE_REF: ${{ github.event.inputs.mcpp_ref || 'feat/cross-platform-infra' }}
+  XLINGS_VERSION: v2026.10.26.1
+  XLINGS_NON_INTERACTIVE: '1'
+
+jobs:
+  # THE CONFORMANCE SUITE ON FREEBSD. Built on Linux for `x86_64-freebsd' above
+  # FreeBSD's own C library (the base system's sysroot, ci/freebsd-platform),
+  # and run in a FreeBSD virtual machine, as the system a user runs it on. The
+  # three-way check of the manifest, kal_interfaces() and the exported names is
+  # made on both sides: the exported names when the suite is built, the other
+  # two by the suite when it runs.
+  conformance:
+    name: conformance (freebsd x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The committed manifest names no local directory
+        run: |
+          set -euo pipefail
+          bad=$(grep -nE '^[a-z-]+ = \{[^}]*path = "(/|[A-Za-z]:)' mcpp.toml || true)
+          if [ -n "$bad" ]; then
+            echo "::error::the committed manifest names an absolute path"; printf '%s\n' "$bad"; exit 1
+          fi
+
+      - name: The specification
+        run: |
+          git clone --quiet https://github.com/mcpplibs/openkal.git .spec
+          branch='${{ github.head_ref || github.ref_name }}'
+          if git -C .spec rev-parse --verify --quiet "origin/$branch" > /dev/null; then
+            git -C .spec checkout --quiet "origin/$branch"
+            echo "the specification is at $branch"
+          else
+            echo "the specification has no $branch; its default branch is used"
+          fi
+
+      - name: Install xlings
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/openxlings/xlings/main/tools/other/quick_install.sh \
+            | bash -s "$XLINGS_VERSION"
+          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+
+      - name: Install mcpp
+        run: |
+          set -euo pipefail
+          xlings update
+          xlings install "mcpp@$MCPP_VERSION" -y -g
+          mcpp self config --mirror GLOBAL
+          if [ -n "${MCPP_SOURCE_REF:-}" ]; then
+            src="$RUNNER_TEMP/mcpp-src"
+            git clone --quiet --depth 1 --branch "$MCPP_SOURCE_REF" https://github.com/mcpp-community/mcpp.git "$src"
+            rm -f "$src/.xlings.json"
+            ( cd "$src" && mcpp build --release )
+            built=$(find "$src/target" -type f -name mcpp | head -1)
+            [ -n "$built" ] || { echo "::error::mcpp did not build from $MCPP_SOURCE_REF"; exit 1; }
+            echo "$(cd "$(dirname "$built")" && pwd)" >> "$GITHUB_PATH"
+            echo "under review: $("$built" --version) (from $MCPP_SOURCE_REF)"
+          fi
+
+      - name: The suite, built for FreeBSD
+        env:
+          OPENKAL_CONFORMANCE_RUNNER: ${{ github.workspace }}/tools/defer-runner
+          OKF_DEFERRED: ${{ github.workspace }}/.deferred
+        run: |
+          set -euo pipefail
+          mcpp --version
+          bash .spec/tools/run-conformance.sh openkal-freebsd . \
+            full,exec,random,terminal,timeout,map,region \
+            --target x86_64-freebsd --platform "path:$GITHUB_WORKSPACE/ci/freebsd-platform"
+
+      - name: The suite, run in FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          run: |
+            set -e
+            uname -a
+            ./.deferred/run.sh > .deferred/run.log 2>&1 || echo "status $?" >> .deferred/run.log
+            cat .deferred/run.log
+
+      - name: The verdict
+        run: |
+          set -euo pipefail
+          log=.deferred/run.log
+          { echo '### openkal-freebsd conformance on FreeBSD'; echo '```'; grep -E '^observations|DID NOT HOLD|^the implementation' "$log" | sort -u; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          ! grep -q '^status ' "$log" || { echo "::error::the suite did not finish with status 0"; grep '^status ' "$log"; exit 1; }
+          grep -qE '^observations: [0-9]+ held, 0 did not hold' "$log" || { echo "::error::an observation did not hold"; exit 1; }

@@ -1,0 +1,50 @@
+[package]
+namespace   = "mcpplibs"
+name        = "openkal-freebsd"
+version     = "0.1.0"
+description = "An implementation of openkal for FreeBSD, written on the kernel's own system-call interface."
+license     = "Apache-2.0"
+authors     = ["mcpplibs"]
+repo        = "https://github.com/mcpplibs/openkal-freebsd"
+
+provides    = ["mcpp:kernel-abi=openkal"]
+
+# WHICH INTERFACES THIS IMPLEMENTATION PROVIDES, AND NO OTHER. An interface it
+# does not provide is absent: it is not in this list, not in kal_interfaces(),
+# and none of its names is defined (SPEC.md clause 6.1). The conformance
+# suite's three-way check compares this list with kal_interfaces() and with the
+# names the artefact exports.
+#
+# Absent in 0.1: openkal.space, openkal.net, openkal.datagram, openkal.prof and
+# openkal.debug.
+[kernel-abi]
+provides-interfaces = [
+    "openkal.abort",
+    "openkal.stream",
+    "openkal.memory",
+    "openkal.env",
+    "openkal.time",
+    "openkal.random",
+    "openkal.fs",
+    "openkal.process",
+    "openkal.task",
+    "openkal.exec",
+    "openkal.terminal",
+    "openkal.timeout",
+    "openkal.map",
+    "openkal.region",
+]
+
+[dependencies]
+openkal = "0.25.0"
+
+[build]
+sources = ["src/*.cpp"]
+# No exception propagates out of a C entry point, and nothing here is
+# identified at run time. The flags are attached to this package's sources;
+# the conformance tests are consumers.
+flags = [
+  { glob = "src/**", cxxflags = ["-fno-exceptions", "-fno-rtti"] },
+]
+# The threads of the program's runtime, which a context is (src/task.cpp).
+ldflags = ["-lthr"]
