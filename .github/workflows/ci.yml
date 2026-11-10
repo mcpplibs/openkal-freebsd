@@ -13,10 +13,10 @@ on:
 
 env:
   # THE ENGINE THAT KNOWS THE TARGET. `x86_64-freebsd' is a row of mcpp
-  # 2026.11.10.1; until it is released the engine is built from the branch that
-  # carries it, with the released one as the compiler of that build.
-  MCPP_VERSION: 2026.11.9.1
-  MCPP_SOURCE_REF: ${{ github.event.inputs.mcpp_ref || 'feat/cross-platform-infra' }}
+  # 2026.11.10.1. A run given `mcpp_ref' builds the engine from that branch or
+  # tag, with the released one as the compiler of that build.
+  MCPP_VERSION: 2026.11.10.1
+  MCPP_SOURCE_REF: ${{ github.event.inputs.mcpp_ref || '' }}
   XLINGS_VERSION: v2026.10.26.1
   XLINGS_NON_INTERACTIVE: '1'
 
@@ -104,15 +104,13 @@ jobs:
           if [ '${{ matrix.arrangement }}' = standalone ]; then
             branch='${{ github.head_ref || github.ref_name }}'
             # openkal-musl and openkal-llvm-runtime (the suite's C and C++
-            # runtimes) at their branch of the same name, else feat/freebsd,
-            # else their default branch.
+            # runtimes) at their branch of the same name, else their default
+            # branch.
             for repo in openkal-musl openkal-llvm-runtime; do
               git clone --quiet "https://github.com/mcpplibs/$repo.git" ".$repo"
-              for b in "$branch" feat/freebsd; do
-                if git -C ".$repo" rev-parse --verify --quiet "origin/$b" > /dev/null; then
-                  git -C ".$repo" checkout --quiet "origin/$b"; echo "$repo is at $b"; break
-                fi
-              done
+              if git -C ".$repo" rev-parse --verify --quiet "origin/$branch" > /dev/null; then
+                git -C ".$repo" checkout --quiet "origin/$branch"; echo "$repo is at $branch"
+              fi
             done
             bash tools/run-conformance-standalone.sh .spec .openkal-musl '${{ matrix.arch }}' "$features" .openkal-llvm-runtime
           else

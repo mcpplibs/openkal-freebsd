@@ -108,10 +108,9 @@ runs above openkal-musl on the `*-freebsd-musl` rows.
 - `tools/vm-run.py` runs a program in a local FreeBSD VM image for development
   (`OKF_VM_IMAGE`, `tools/vm-runner`). It forwards `OPENKAL_*`, `KAL_*` and the
   mtest protocol's variables, so the suite can report through mtest once the
-  runner's listing pass honours `--run-under` (mtest 0.5.3).
+  runner's listing pass honours `--run-under` (mtest 0.6.0).
 
-The targets need mcpp 2026.11.10.1 or later. Until that release, CI builds the
-engine from the branch that carries it.
+The targets need mcpp 2026.11.10.1 or later.
 
 ## License
 
