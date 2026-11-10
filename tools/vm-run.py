@@ -48,7 +48,9 @@ if report:
 for f in args.file + [command[0]]:
     if os.path.isfile(f):
         shutil.copy2(f, os.path.join(share, os.path.basename(f)))
-program = "./" + os.path.basename(command[0])
+# A program offered from here is run from the copy; one named otherwise is the
+# machine's own (`/usr/bin/lldb').
+program = "./" + os.path.basename(command[0]) if os.path.isfile(command[0]) else command[0]
 
 def quote(a):
     return "'" + a.replace("'", "'\\''") + "'"
