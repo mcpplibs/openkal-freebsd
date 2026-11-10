@@ -1,4 +1,4 @@
-// openkal.process: a program started by fork and fexecve, awaited by wait4,
+// openkal.process: a program started by pdfork and fexecve, awaited by wait6,
 // units as process groups, and the requests to end taken over by sigaction.
 #include "common.h"
 
@@ -31,6 +31,27 @@ bool ended_record(int pid, ended_program* out) {
     g_ended_lock.unlock();
     return found;
 }
+// THE DESCRIPTORS OF THE PROGRAMS STARTED (pdfork), held while their handles
+// are: PD_DAEMON, so that releasing one does not end its program.
+struct started { int pid; int pd; };
+constexpr int kStartedMax = 1024;
+started g_started[kStartedMax];
+int g_started_count = 0;
+void started_keep(int pid, int pd) {
+    g_ended_lock.lock();
+    if (g_started_count < kStartedMax) g_started[g_started_count++] = started{ pid, pd };
+    else okf::close(pd);
+    g_ended_lock.unlock();
+}
+void started_release(int pid) {
+    int pd = -1;
+    g_ended_lock.lock();
+    for (int i = 0; i < g_started_count; ++i)
+        if (g_started[i].pid == pid) { pd = g_started[i].pd; g_started[i] = g_started[--g_started_count]; break; }
+    g_ended_lock.unlock();
+    if (pd >= 0) okf::close(pd);
+}
+
 void ended_forget(int pid) {
     g_ended_lock.lock();
     for (int i = 0; i < g_ended_count; ++i)
@@ -38,7 +59,7 @@ void ended_forget(int pid) {
     g_ended_lock.unlock();
 }
 
-kal_u64 cpu_of(const struct rusage& ru) {
+kal_u64 cpu_of(const okf::krusage& ru) {
     return (static_cast<kal_u64>(ru.ru_utime.tv_sec) + static_cast<kal_u64>(ru.ru_stime.tv_sec)) * 1000000000ull
          + (static_cast<kal_u64>(ru.ru_utime.tv_usec) + static_cast<kal_u64>(ru.ru_stime.tv_usec)) * 1000ull;
 }
@@ -46,8 +67,9 @@ kal_u64 cpu_of(const struct rusage& ru) {
 int reap(int pid, int opts, int* status, int* terminated, bool* done) {
     ended_program e{};
     if (!ended_record(pid, &e)) {
-        int s = 0; struct rusage ru{}; word r;
-        do r = okf::wait4(pid, &s, opts, &ru); while (r == -EINTR);
+        int s = 0; okf::kwrusage wr{}; word r;
+        do r = okf::wait6(P_PID, pid, &s, opts | WEXITED | WTRAPPED, &wr); while (r == -EINTR);
+        const okf::krusage& ru = wr.wru_self;
         if (okf::failed(r)) return okf::fail(r);
         *done = r != 0;
         if (!*done) return kal_ok;
@@ -101,9 +123,9 @@ void arm_stop() {
         return;
     }
     for (const int sig : kStopSignals) {
-        struct sigaction old{};
+        okf::ksigaction old{};
         if (!okf::failed(okf::sigaction(sig, nullptr, &old)) && old.sa_handler == SIG_IGN) continue;
-        struct sigaction act{};
+        okf::ksigaction act{};
         act.sa_handler = stop_handler;
         act.sa_flags = SA_RESTART;
         okf::sigaction(sig, &act, nullptr);
@@ -153,7 +175,7 @@ int kal_process_spawn(const kal_spawn* how, const char* path, kal_uintptr path_l
     char p[okf::kPath]; okf::copy(p, path, path_len); p[path_len] = 0;
     const word exe = okf::openat(base, p, O_RDONLY | O_CLOEXEC);
     if (okf::failed(exe)) return okf::fail(exe);
-    struct stat st{};
+    okf::kstat st{};
     const word sr = okf::fstat(static_cast<int>(exe), &st);
     if (okf::failed(sr)) { okf::close(static_cast<int>(exe)); return okf::fail(sr); }
     if (S_ISDIR(st.st_mode)) { okf::close(static_cast<int>(exe)); return kal_err_is_directory; }
@@ -211,7 +233,8 @@ int kal_process_spawn(const kal_spawn* how, const char* path, kal_uintptr path_l
     if (okf::failed(pr)) { release(); return okf::fail(pr); }
     const int join = how->job ? static_cast<int>(how->job->h) : 0;   // 0: a new unit
 
-    const word pid = okf::fork();
+    int pd = -1;
+    const word pid = okf::pdfork(&pd, PD_DAEMON | PD_CLOEXEC);
     if (pid == 0) {
         // THE COPY: system calls only, until the program replaces it.
         auto refused = [&](word r) {
@@ -232,10 +255,10 @@ int kal_process_spawn(const kal_spawn* how, const char* path, kal_uintptr path_l
             const word d = okf::dup2(saved[i], i);
             if (okf::failed(d)) refused(d);
         }
-        struct sigaction dfl{};
+        okf::ksigaction dfl{};
         dfl.sa_handler = SIG_DFL;
         for (int s = 1; s < NSIG; ++s) if (s != SIGKILL && s != SIGSTOP) okf::sigaction(s, &dfl, nullptr);
-        sigset_t none{};
+        okf::ksigset none{};
         okf::sigprocmask(SIG_SETMASK, &none, nullptr);
         const word c = okf::fchdir(work);
         if (okf::failed(c)) refused(c);
@@ -250,10 +273,12 @@ int kal_process_spawn(const kal_spawn* how, const char* path, kal_uintptr path_l
     okf::close(report[0]);
     if (r == sizeof e) {
         int s = 0;
-        okf::wait4(static_cast<int>(pid), &s, 0, nullptr);
+        okf::wait6(P_PID, pid, &s, WEXITED, nullptr);
+        okf::close(pd);
         return okf::translate(e);
     }
     if (how->job && how->job->h == 0) how->job->h = static_cast<kal_uintptr>(pid);
+    started_keep(static_cast<int>(pid), pd);
     *out = kal_process{ started_handle(static_cast<int>(pid)) };
     return kal_ok;
 }
@@ -283,7 +308,7 @@ int kal_process_terminate(kal_process p) {
     return okf::failed(r) ? okf::fail(r) : kal_ok;
 }
 void kal_process_close(kal_process p) {
-    if (p.h != 0 && !(p.h & (kOpened | kSelf))) ended_forget(pid_of(p));
+    if (p.h != 0 && !(p.h & (kOpened | kSelf))) { ended_forget(pid_of(p)); started_release(pid_of(p)); }
 }
 int kal_process_self(kal_process* out) {
     if (!out) return kal_err_invalid;
@@ -303,7 +328,7 @@ int kal_process_info(kal_process p, kal_u32 wanted, kal_program_info* out) {
     const int pid = pid_of(p);
     i.present = KAL_PINFO_ID; i.id = static_cast<kal_u64>(pid);
     if (p.h & kSelf) {
-        struct rusage ru{};
+        okf::krusage ru{};
         if (!okf::failed(okf::getrusage(RUSAGE_SELF, &ru))) { i.cpu_ns = cpu_of(ru); i.present |= KAL_PINFO_CPU; }
         i.present |= KAL_PINFO_ENDED; i.ended = 0;
     } else if (!(p.h & kOpened)) {
@@ -314,9 +339,9 @@ int kal_process_info(kal_process p, kal_u32 wanted, kal_program_info* out) {
     }
     i.present &= wanted | KAL_PINFO_ID;
     struct { kal_u32 bit; unsigned long end; } const fields[] = {
-        { KAL_PINFO_ID,    offsetof(kal_program_info, id) + 8 },
-        { KAL_PINFO_CPU,   offsetof(kal_program_info, cpu_ns) + 8 },
-        { KAL_PINFO_ENDED, offsetof(kal_program_info, ended) + 4 },
+        { KAL_PINFO_ID,    __builtin_offsetof(kal_program_info, id) + 8 },
+        { KAL_PINFO_CPU,   __builtin_offsetof(kal_program_info, cpu_ns) + 8 },
+        { KAL_PINFO_ENDED, __builtin_offsetof(kal_program_info, ended) + 4 },
     };
     for (const auto& f : fields) if (cap < f.end) i.present &= ~f.bit;
     okf::copy(out, &i, cap < sizeof i ? cap : sizeof i);
@@ -360,10 +385,10 @@ int kal_process_end_as_requested(void) {
     const int sig = __atomic_load_n(&g_stop_signal, __ATOMIC_ACQUIRE);
     if (sig == 0 || __atomic_load_n(&g_stop_word, __ATOMIC_ACQUIRE) == 0) return kal_err_invalid;
     // The request's own disposition, restored, and the request made again.
-    struct sigaction act{};
+    okf::ksigaction act{};
     act.sa_handler = SIG_DFL;
     okf::sigaction(sig, &act, nullptr);
-    sigset_t one{}; one.__bits[(sig - 1) / 32] = 1u << ((sig - 1) % 32);
+    okf::ksigset one{}; one.__bits[(sig - 1) / 32] = 1u << ((sig - 1) % 32);
     okf::sigprocmask(SIG_UNBLOCK, &one, nullptr);
     okf::kill(static_cast<int>(okf::getpid()), sig);
     return kal_err_invalid;

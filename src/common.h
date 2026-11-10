@@ -86,6 +86,8 @@ struct cname {
 extern int    g_argc;
 extern char** g_argv;
 extern char** g_envp;
+extern unsigned long* g_auxv;   // standalone only
+unsigned long auxval(unsigned long key);
 
 // A value of the environment, or null.
 const char* variable(const char* name, unsigned long n);

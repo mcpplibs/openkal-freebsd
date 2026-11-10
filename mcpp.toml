@@ -46,5 +46,27 @@ sources = ["src/*.cpp"]
 flags = [
   { glob = "src/**", cxxflags = ["-fno-exceptions", "-fno-rtti"] },
 ]
-# The threads of the program's runtime, which a context is (src/task.cpp).
+
+# THE THREADS OF THE PROGRAM'S RUNTIME, which a context is in the hosted
+# arrangement (src/task.cpp): FreeBSD's own C library's rows. A row whose C
+# library is written above openkal (`*-freebsd-musl') has no libthr, and this
+# implementation is then standalone.
+[target.'cfg(all(os = "freebsd", not(env = "musl")))'.build]
 ldflags = ["-lthr"]
+
+[features]
+default = []
+
+# Whether this implementation is the whole of the program's environment.
+#
+# Ordinarily the program carries a runtime that has already received control
+# and creates its contexts --- FreeBSD's C library and libthr --- and this
+# implementation borrows both. That is the default.
+#
+# Where nothing in the program has received control --- the program supplies
+# its own runtime, or it is a C library written above openkal (openkal-musl) ---
+# this implementation does both: it begins the program (`_start', the image's
+# .note.tag brand, the thread pointer through sysarch) and creates contexts with
+# thr_new. That is what `standalone' selects, a statement about the program
+# that the consumer which knows it makes.
+standalone = { defines = ["OKF_STANDALONE"] }

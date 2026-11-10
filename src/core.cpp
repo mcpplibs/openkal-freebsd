@@ -29,7 +29,7 @@ namespace {
 }
 
 kal_u64 ns_of(int clock) {
-    struct timespec t{};
+    okf::ktimespec t{};
     okf::clock_gettime(clock, &t);
     return static_cast<kal_u64>(t.tv_sec) * 1000000000ull + static_cast<kal_u64>(t.tv_nsec);
 }
@@ -54,10 +54,10 @@ kal_u64 kal_interfaces(void) {
     if (msg && len) { okf::write(2, msg, len); okf::write(2, "\n", 1); }
     // SIGABRT, at its default disposition and not blocked, sent to this program;
     // a program that survived it ends with the status of an abort.
-    struct sigaction dfl{};
+    okf::ksigaction dfl{};
     dfl.sa_handler = SIG_DFL;
     okf::sigaction(SIGABRT, &dfl, nullptr);
-    sigset_t only{}; only.__bits[(SIGABRT - 1) / 32] = 1u << ((SIGABRT - 1) % 32);
+    okf::ksigset only{}; only.__bits[(SIGABRT - 1) / 32] = 1u << ((SIGABRT - 1) % 32);
     okf::sigprocmask(SIG_UNBLOCK, &only, nullptr);
     okf::kill(static_cast<int>(okf::getpid()), SIGABRT);
     okf::exit(134);
@@ -93,7 +93,7 @@ kal_intptr kal_stream_read(kal_stream s, void* buf, kal_uintptr len) {
 int kal_stream_flush(kal_stream s) { return okf::unpack(s.h) < 0 ? kal_err_invalid : kal_ok; }
 kal_uintptr kal_stream_props(kal_stream s) {
     const int fd = okf::unpack(s.h);
-    struct termios t{};
+    okf::ktermios t{};
     return (fd >= 0 && !okf::failed(okf::ioctl(fd, TIOCGETA, &t))) ? KAL_STREAM_PROP_INTERACTIVE : 0;
 }
 
@@ -155,13 +155,13 @@ int kal_env_resources(void) {
 kal_duration kal_time_monotonic(void) { return ns_of(CLOCK_MONOTONIC); }
 kal_duration kal_time_wall(void) { return ns_of(CLOCK_REALTIME); }
 kal_duration kal_time_monotonic_granularity(void) {
-    struct timespec t{};
+    okf::ktimespec t{};
     if (okf::failed(okf::clock_getres(CLOCK_MONOTONIC, &t))) return 1;
     const kal_u64 g = static_cast<kal_u64>(t.tv_sec) * 1000000000ull + static_cast<kal_u64>(t.tv_nsec);
     return g ? g : 1;
 }
 void kal_time_sleep(kal_duration ns) {
-    struct timespec t{ static_cast<time_t>(ns / 1000000000ull), static_cast<long>(ns % 1000000000ull) };
+    okf::ktimespec t{ static_cast<long long>(ns / 1000000000ull), static_cast<long>(ns % 1000000000ull) };
     while (okf::nanosleep(&t, &t) == -EINTR) {}
 }
 kal_uintptr kal_time_props(void) { return KAL_TIME_PROP_WALL_AVAILABLE | KAL_TIME_PROP_SLEEP_PRECISE; }

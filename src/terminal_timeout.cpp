@@ -6,8 +6,8 @@ namespace {
 using okf::word;
 
 int ready(int fd, short ev, kal_u64 ns) {
-    struct pollfd p{ fd, ev, 0 };
-    struct timespec t{ static_cast<time_t>(ns / 1000000000ull), static_cast<long>(ns % 1000000000ull) };
+    okf::kpollfd p{ fd, ev, 0 };
+    okf::ktimespec t{ static_cast<long long>(ns / 1000000000ull), static_cast<long>(ns % 1000000000ull) };
     for (;;) {
         const word r = okf::ppoll(&p, 1, ns == 0 ? nullptr : &t, nullptr);
         if (r == -EINTR) continue;
@@ -22,7 +22,7 @@ extern "C" {
 // ================================================================ terminal
 int kal_terminal_get_mode(kal_stream s, kal_uintptr* mode) {
     if (!mode) return kal_err_invalid;
-    struct termios t{};
+    okf::ktermios t{};
     const word r = okf::ioctl(okf::unpack(s.h), TIOCGETA, &t);
     if (okf::failed(r)) return r == -ENOTTY ? kal_err_not_supported : okf::fail(r);
     kal_uintptr m = KAL_TERM_SEQUENCES;
@@ -35,10 +35,10 @@ int kal_terminal_get_mode(kal_stream s, kal_uintptr* mode) {
 }
 int kal_terminal_set_mode(kal_stream s, kal_uintptr m) {
     const int fd = okf::unpack(s.h);
-    struct termios t{};
+    okf::ktermios t{};
     const word r = okf::ioctl(fd, TIOCGETA, &t);
     if (okf::failed(r)) return r == -ENOTTY ? kal_err_not_supported : okf::fail(r);
-    auto setb = [](tcflag_t& w, tcflag_t b, bool on) { w = on ? (w | b) : (w & ~b); };
+    auto setb = [](okf::u32& w, okf::u32 b, bool on) { w = on ? (w | b) : (w & ~b); };
     setb(t.c_lflag, ICANON, m & KAL_TERM_LINE_EDIT);
     setb(t.c_lflag, ECHO,   m & KAL_TERM_ECHO);
     setb(t.c_lflag, ISIG | IEXTEN, !(m & KAL_TERM_PASS_CONTROL));
@@ -49,7 +49,7 @@ int kal_terminal_set_mode(kal_stream s, kal_uintptr m) {
     return okf::failed(w) ? okf::fail(w) : kal_ok;
 }
 int kal_terminal_size(kal_stream s, kal_uintptr* cols, kal_uintptr* rows) {
-    struct winsize w{};
+    okf::kwinsize w{};
     if (okf::failed(okf::ioctl(okf::unpack(s.h), TIOCGWINSZ, &w)) || w.ws_col == 0) return kal_err_not_supported;
     if (cols) *cols = w.ws_col;
     if (rows) *rows = w.ws_row;
@@ -59,9 +59,9 @@ int kal_terminal_size(kal_stream s, kal_uintptr* cols, kal_uintptr* rows) {
 // one (a serial line states none).
 kal_uintptr kal_terminal_props(kal_stream s) {
     const int fd = okf::unpack(s.h);
-    struct termios t{};
+    okf::ktermios t{};
     if (fd < 0 || okf::failed(okf::ioctl(fd, TIOCGETA, &t))) return 0;
-    struct winsize w{};
+    okf::kwinsize w{};
     const bool sized = !okf::failed(okf::ioctl(fd, TIOCGWINSZ, &w)) && w.ws_col != 0;
     return KAL_TERM_PROP_MODE | (sized ? KAL_TERM_PROP_SIZE : 0);
 }

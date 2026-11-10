@@ -42,7 +42,7 @@ int kind_of(unsigned mode) {
 
 // The fields an enquiry fills: no more of the structure than the caller stated
 // (`self_size'), and, where `mask' is not all of them, only those asked for.
-void fill_info(const struct stat& st, kal_node_info* out, kal_u32 mask = ~kal_u32{0}) {
+void fill_info(const okf::kstat& st, kal_node_info* out, kal_u32 mask = ~kal_u32{0}) {
     const kal_u32 cap = out->self_size;
     kal_node_info i{};
     i.self_size = cap;
@@ -56,12 +56,12 @@ void fill_info(const struct stat& st, kal_node_info* out, kal_u32 mask = ~kal_u3
     if (i.kind == kal_node_file) { i.present |= KAL_INFO_EXECUTABLE; i.executable = (st.st_mode & 0111) != 0; }
     i.present &= mask | KAL_INFO_KIND;
     struct { kal_u32 bit; unsigned long end; } const fields[] = {
-        { KAL_INFO_SIZE,       offsetof(kal_node_info, size) + 8 },
-        { KAL_INFO_MODIFIED,   offsetof(kal_node_info, modified_ns) + 8 },
-        { KAL_INFO_IDENTITY,   offsetof(kal_node_info, identity) + 16 },
-        { KAL_INFO_KIND,       offsetof(kal_node_info, kind) + sizeof(int) },
-        { KAL_INFO_WRITABLE,   offsetof(kal_node_info, writable) + sizeof(int) },
-        { KAL_INFO_EXECUTABLE, offsetof(kal_node_info, executable) + sizeof(int) },
+        { KAL_INFO_SIZE,       __builtin_offsetof(kal_node_info, size) + 8 },
+        { KAL_INFO_MODIFIED,   __builtin_offsetof(kal_node_info, modified_ns) + 8 },
+        { KAL_INFO_IDENTITY,   __builtin_offsetof(kal_node_info, identity) + 16 },
+        { KAL_INFO_KIND,       __builtin_offsetof(kal_node_info, kind) + sizeof(int) },
+        { KAL_INFO_WRITABLE,   __builtin_offsetof(kal_node_info, writable) + sizeof(int) },
+        { KAL_INFO_EXECUTABLE, __builtin_offsetof(kal_node_info, executable) + sizeof(int) },
     };
     for (const auto& f : fields) if (cap < f.end) i.present &= ~f.bit;
     if (!(i.present & KAL_INFO_SIZE)) i.size = 0;
@@ -77,20 +77,20 @@ void fill_info(const struct stat& st, kal_node_info* out, kal_u32 mask = ~kal_u3
 struct lister {
     int fd;
     long pos, end;
-    off_t base;
+    long long base;
     alignas(8) char buf[8192];
 };
 
 int set_time(int dir, const char* name, int fd, kal_u64 ns) {
-    struct timespec t[2];
+    okf::ktimespec t[2];
     t[0].tv_sec = 0; t[0].tv_nsec = UTIME_OMIT;
-    t[1].tv_sec = static_cast<time_t>(ns / 1000000000ull); t[1].tv_nsec = static_cast<long>(ns % 1000000000ull);
+    t[1].tv_sec = static_cast<long long>(ns / 1000000000ull); t[1].tv_nsec = static_cast<long>(ns % 1000000000ull);
     const word r = name ? okf::utimensat(dir, name, t, 0) : okf::futimens(fd, t);
     return okf::failed(r) ? okf::fail(r) : kal_ok;
 }
 
 // The next entry other than `.' and `..', or none (*iter becomes zero).
-int next_entry(int dfd, kal_uintptr* iter, char* name, kal_uintptr cap, kal_uintptr* nlen, int* kind, struct stat* st) {
+int next_entry(int dfd, kal_uintptr* iter, char* name, kal_uintptr cap, kal_uintptr* nlen, int* kind, okf::kstat* st) {
     if (!iter) return kal_err_invalid;
     auto* l = reinterpret_cast<lister*>(*iter);
     if (!l) { if (nlen) *nlen = 0; return kal_ok; }
@@ -107,7 +107,7 @@ int next_entry(int dfd, kal_uintptr* iter, char* name, kal_uintptr cap, kal_uint
             }
             l->pos = 0; l->end = r;
         }
-        auto* e = reinterpret_cast<struct dirent*>(l->buf + l->pos);
+        auto* e = reinterpret_cast<okf::kdirent*>(l->buf + l->pos);
         if (e->d_reclen == 0) { l->pos = l->end; continue; }
         l->pos += e->d_reclen;
         if (e->d_fileno == 0) continue;
@@ -115,7 +115,7 @@ int next_entry(int dfd, kal_uintptr* iter, char* name, kal_uintptr cap, kal_uint
         if ((n == 1 && e->d_name[0] == '.') || (n == 2 && e->d_name[0] == '.' && e->d_name[1] == '.')) continue;
         okf::put(e->d_name, n, name, cap);
         if (nlen) *nlen = n;
-        struct stat s{};
+        okf::kstat s{};
         const bool have = !okf::failed(okf::fstatat(dfd, e->d_name, &s, AT_SYMLINK_NOFOLLOW));
         if (kind) *kind = have ? kind_of(s.st_mode) : kal_node_other;
         if (st) { if (have) *st = s; else okf::zero(st, sizeof *st); }
@@ -165,7 +165,7 @@ int kal_fs_open(kal_dir base, const char* name, kal_uintptr len, kal_uintptr f, 
     if (f & KAL_OPEN_APPEND)    o |= O_APPEND;
     const word fd = okf::openat(b, n.buf, o, 0666);
     if (okf::failed(fd)) return okf::fail(fd);
-    struct stat st{};
+    okf::kstat st{};
     if (!okf::failed(okf::fstat(static_cast<int>(fd), &st)) && S_ISDIR(st.st_mode)) {
         okf::close(static_cast<int>(fd));
         return kal_err_is_directory;
@@ -207,7 +207,7 @@ kal_intptr kal_fs_write_at(kal_file f, const void* buf, kal_uintptr len, kal_u64
 int kal_fs_info(kal_dir base, const char* name, kal_uintptr len, kal_uintptr flags, kal_u32, kal_node_info* out) {
     const int b = okf::unpack(base.h); okf::cname n(name, len);
     if (b < 0 || !out || !n.ok) return kal_err_invalid;
-    struct stat st{};
+    okf::kstat st{};
     const word r = okf::fstatat(b, n.buf, &st, (flags & KAL_FS_NO_RESOLVE) ? AT_SYMLINK_NOFOLLOW : 0);
     if (okf::failed(r)) {
         if (r == -ENOENT) {
@@ -224,7 +224,7 @@ int kal_fs_info(kal_dir base, const char* name, kal_uintptr len, kal_uintptr fla
 }
 int kal_fs_file_info(kal_file f, kal_u32, kal_node_info* out) {
     if (!out) return kal_err_invalid;
-    struct stat st{};
+    okf::kstat st{};
     const word r = okf::fstat(okf::unpack(f.h), &st);
     if (okf::failed(r)) return okf::fail(r);
     fill_info(st, out);
@@ -265,7 +265,7 @@ int kal_fs_set_modified_at(kal_dir base, const char* name, kal_uintptr len, kal_
 }
 int kal_fs_set_executable_at(kal_dir base, const char* name, kal_uintptr len, int executable) {
     okf::cname n(name, len); if (!n.ok) return kal_err_invalid;
-    struct stat st{}; const int b = okf::unpack(base.h);
+    okf::kstat st{}; const int b = okf::unpack(base.h);
     const word r = okf::fstatat(b, n.buf, &st, 0);
     if (okf::failed(r)) return okf::fail(r);
     if (S_ISDIR(st.st_mode)) return kal_err_is_directory;
@@ -292,8 +292,8 @@ int kal_fs_lock(kal_file f, kal_u64 start, kal_u64 len, kal_uintptr mode) {
             return kal_ok;
         }
     }
-    struct flock l{}; l.l_type = exclusive ? F_WRLCK : F_RDLCK;
-    l.l_whence = SEEK_SET; l.l_start = static_cast<off_t>(start); l.l_len = static_cast<off_t>(len);
+    okf::kflock l{}; l.l_type = exclusive ? F_WRLCK : F_RDLCK;
+    l.l_whence = SEEK_SET; l.l_start = static_cast<long long>(start); l.l_len = static_cast<long long>(len);
     for (;;) {
         const word r = okf::fcntl(fd, wait ? F_SETLKW : F_SETLK, okf::w(&l));
         if (r == -EINTR) continue;
@@ -308,13 +308,13 @@ int kal_fs_unlock(kal_file f, kal_u64 start, kal_u64 len) {
         const word r = okf::flock(fd, LOCK_UN);
         return okf::failed(r) ? okf::fail(r) : kal_ok;
     }
-    struct flock l{}; l.l_type = F_UNLCK; l.l_whence = SEEK_SET;
-    l.l_start = static_cast<off_t>(start); l.l_len = static_cast<off_t>(len);
+    okf::kflock l{}; l.l_type = F_UNLCK; l.l_whence = SEEK_SET;
+    l.l_start = static_cast<long long>(start); l.l_len = static_cast<long long>(len);
     const word r = okf::fcntl(fd, F_SETLK, okf::w(&l));
     return okf::failed(r) ? okf::fail(r) : kal_ok;
 }
 int kal_fs_capacity(kal_dir d, kal_u64* total, kal_u64* avail) {
-    struct statfs v{};
+    okf::kstatfs v{};
     const word r = okf::fstatfs(okf::unpack(d.h), &v);
     if (okf::failed(r)) return okf::fail(r);
     if (total) *total = static_cast<kal_u64>(v.f_blocks) * static_cast<kal_u64>(v.f_bsize);
@@ -341,7 +341,7 @@ int kal_fs_hard_link(kal_dir from, const char* a, kal_uintptr al, kal_dir to, co
     if (f < 0 || t < 0 || !x.ok || !y.ok) return kal_err_invalid;
     // A directory is refused before the call: the kernel's answer (EPERM)
     // names a permission. Two volumes are the kernel's EXDEV.
-    struct stat st{};
+    okf::kstat st{};
     if (!okf::failed(okf::fstatat(f, x.buf, &st, AT_SYMLINK_NOFOLLOW)) && S_ISDIR(st.st_mode)) return kal_err_is_directory;
     const word r = okf::linkat(f, x.buf, t, y.buf, 0);
     if (!okf::failed(r)) return kal_ok;
@@ -367,7 +367,7 @@ int kal_fs_list_next(kal_dir d, kal_uintptr* iter, char* name, kal_uintptr cap, 
 }
 int kal_fs_list_next_info(kal_dir d, kal_uintptr* iter, char* name, kal_uintptr cap, kal_uintptr* nlen, kal_u32 wanted, kal_node_info* info) {
     if (okf::unpack(d.h) < 0 || !info) return kal_err_invalid;
-    struct stat st{}; int kind = 0;
+    okf::kstat st{}; int kind = 0;
     const int r = next_entry(okf::unpack(d.h), iter, name, cap, nlen, &kind, &st);
     if (r == kal_ok && *iter) fill_info(st, info, wanted);
     return r;

@@ -119,8 +119,8 @@ int kal_memory_info(kal_memory_status* out) {
         if ((v.present & KAL_MSTATUS_TOTAL) && v.available_bytes > v.total_bytes) v.available_bytes = v.total_bytes;
         v.present |= KAL_MSTATUS_AVAILABLE;
     }
-    if (self < offsetof(kal_memory_status, total_bytes) + 8) v.present &= ~KAL_MSTATUS_TOTAL;
-    if (self < offsetof(kal_memory_status, available_bytes) + 8) v.present &= ~KAL_MSTATUS_AVAILABLE;
+    if (self < __builtin_offsetof(kal_memory_status, total_bytes) + 8) v.present &= ~KAL_MSTATUS_TOTAL;
+    if (self < __builtin_offsetof(kal_memory_status, available_bytes) + 8) v.present &= ~KAL_MSTATUS_AVAILABLE;
     okf::copy(out, &v, self < sizeof v ? self : sizeof v);
     return kal_ok;
 }

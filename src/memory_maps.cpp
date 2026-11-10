@@ -50,7 +50,7 @@ int kal_exec_map_part(void* r, kal_uintptr off, kal_uintptr size, kal_file f, ka
     if (how & ~(KAL_EXEC_MAP_EXECUTE | KAL_EXEC_MAP_PREFETCH | KAL_EXEC_MAP_BTI | KAL_EXEC_MAP_WRITE))
         return kal_err_invalid;
     if ((how & KAL_EXEC_MAP_WRITE) && (how & KAL_EXEC_MAP_EXECUTE)) return kal_err_invalid;
-    struct stat st{};
+    okf::kstat st{};
     const word s = okf::fstat(okf::unpack(f.h), &st);
     if (okf::failed(s)) return okf::fail(s);
     if (at + size > static_cast<kal_u64>(st.st_size)) return kal_err_invalid;
@@ -73,7 +73,7 @@ kal_uintptr kal_exec_props(void) {
 // ================================================================ map
 int kal_map_file(kal_file f, kal_u64 offset, kal_uintptr length, kal_uintptr how, void** out) {
     if (!out || length == 0 || offset % KAL_MAP_ALIGNMENT || (how & ~(KAL_MAP_WRITE | KAL_MAP_SHARED))) return kal_err_invalid;
-    struct stat st{};
+    okf::kstat st{};
     const word s = okf::fstat(okf::unpack(f.h), &st);
     if (okf::failed(s)) return okf::fail(s);
     if (offset + length > static_cast<kal_u64>(st.st_size)) return kal_err_invalid;
