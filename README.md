@@ -127,9 +127,11 @@ image that `OKF_VM_IMAGE` names under `qemu-system-x86_64` (KVM where the host
 has it, the software machine otherwise), offers the artefact on a read-only
 drive, runs it as root on the serial console, writes what it writes to the
 standard output and error, answers with its exit status, and shuts the machine
-down; the temporary overlay it booted from is discarded. The image is the
-FreeBSD VM disk of the `xim` package `freebsd-vm`, published separately, and
-`qemu-system-x86_64` with `qemu-img` are the host's dependencies.
+down; the temporary overlay it booted from is discarded. The disk is the
+FreeBSD 14.5-RELEASE boot disk of the `xim` package `freebsd-disk` (The
+FreeBSD Project's release, installed from the official installer disc;
+published separately), and `qemu-system-x86_64` with `qemu-img` are the
+host's dependencies.
 
 The targets need mcpp 2026.11.10.1 or later.
 
