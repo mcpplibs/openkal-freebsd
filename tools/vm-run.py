@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Runs a program in a FreeBSD virtual machine and answers as the program did.
 
-    vm-run.py --image <disk.qcow2> [--file <path>]... -- <program> [arguments...]
+    vm-run.py [--image <disk.qcow2>] [--file <path>]... -- <program> [arguments...]
 
-The machine is booted under qemu/KVM from <disk> (an overlay of FreeBSD's own
-VM image; nothing is written to its backing file), the files are offered to it
-on a read-only FAT drive and copied to /tmp/run, and the program is run there as
-root on the serial console. What it writes is written here, and its status is
-this program's status. Every argument is passed through single quotes, so the
-command line is the one given.
+The image is <disk>, or OKF_VM_IMAGE where --image is absent. The machine is
+booted under qemu from a temporary overlay of <disk> (qemu-img; nothing is
+written to <disk> itself, and two runs at once do not meet), the files are
+offered to it on a read-only FAT drive and copied to /tmp/run, and the program
+is run there as root on the serial console. What it writes is written here, and
+its status is this program's status. Every argument is passed through single
+quotes, so the command line is the one given. KVM is used where the host has it
+(a writable /dev/kvm) and the software machine otherwise.
 
 THE PROGRAM'S ENVIRONMENT. Variables named OPENKAL_* and KAL_* are passed to
 the program. Where a test runner speaks the mtest protocol to it (MTEST_PROTOCOL
@@ -17,14 +19,15 @@ which is appended to MTEST_REPORT here when it ends; MTEST_MODE and MTEST_SELECT
 (a file, offered to the machine) are passed as well.
 
 It is how this repository's conformance suite is run on FreeBSD from a Linux
-host: the suite's runner (OPENKAL_CONFORMANCE_RUNNER). The
-image's kernel console is moved to the serial line at the loader prompt, as the
-official image boots to the video console.
+host: the suite's runner (OPENKAL_CONFORMANCE_RUNNER), which a consumer states
+as a runner declaration naming tools/vm-runner. The image's kernel console is
+moved to the serial line at the loader prompt, as the official image boots to
+the video console.
 """
 import argparse, os, pty, re, select, shutil, subprocess, sys, tempfile, time
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--image", required=True)
+ap.add_argument("--image", default=os.environ.get("OKF_VM_IMAGE"))
 ap.add_argument("--file", action="append", default=[])
 ap.add_argument("--memory", default="2048")
 ap.add_argument("--timeout", type=int, default=1800)
@@ -33,8 +36,11 @@ args = ap.parse_args()
 command = args.command[1:] if args.command[:1] == ["--"] else args.command
 if not command:
     ap.error("no program to run")
+if not args.image:
+    ap.error("no image: --image or OKF_VM_IMAGE")
 
 share = tempfile.mkdtemp(prefix="vm-run-")
+overlay = tempfile.mkdtemp(prefix="vm-run-overlay-")
 forward = {k: v for k, v in os.environ.items() if k.startswith("OPENKAL_") or k.startswith("KAL_")}
 report = os.environ.get("MTEST_REPORT") if os.environ.get("MTEST_PROTOCOL") else None
 if report:
@@ -57,10 +63,16 @@ def quote(a):
 
 line = " ".join(["env"] + [quote(f"{k}={v}") for k, v in sorted(forward.items())]
                + [quote(program)] + [quote(a) for a in command[1:]])
-argv = ["qemu-system-x86_64", "-enable-kvm", "-m", args.memory, "-smp", "2", "-nographic",
-        "-drive", f"file={args.image},if=virtio,format=qcow2",
+overlay_disk = os.path.join(overlay, "run.qcow2")
+subprocess.run(["qemu-img", "create", "-f", "qcow2", "-b", os.path.abspath(args.image),
+                "-F", "qcow2", overlay_disk], check=True,
+               stdout=subprocess.DEVNULL)
+argv = ["qemu-system-x86_64", "-m", args.memory, "-smp", "2", "-nographic",
+        "-drive", f"file={overlay_disk},if=virtio,format=qcow2",
         "-drive", f"file=fat:{share},if=virtio,format=raw,readonly=on",
         "-nic", "none"]
+if os.access("/dev/kvm", os.W_OK):
+    argv.insert(1, "-enable-kvm")
 pid, fd = pty.fork()
 if pid == 0:
     os.execvp(argv[0], argv)
@@ -94,6 +106,7 @@ def stop(status):
     except OSError:
         pass
     shutil.rmtree(share, ignore_errors=True)
+    shutil.rmtree(overlay, ignore_errors=True)
     sys.exit(status)
 
 if read_until(rb"Autoboot in", 180):

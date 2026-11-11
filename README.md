@@ -5,7 +5,7 @@ written on the kernel's own system-call interface.
 
 ```toml
 [target.'cfg(os = "freebsd")'.dependencies]
-openkal-freebsd = "0.1.0"
+openkal-freebsd = "0.1.1"
 ```
 
 ## What it is
@@ -108,7 +108,30 @@ runs above openkal-musl on the `*-freebsd-musl` rows.
 - `tools/vm-run.py` runs a program in a local FreeBSD VM image for development
   (`OKF_VM_IMAGE`, `tools/vm-runner`). It forwards `OPENKAL_*`, `KAL_*` and the
   mtest protocol's variables, so the suite can report through mtest once the
-  runner's listing pass honours `--run-under` (mtest 0.6.0).
+  runner's listing pass honours `--run-under` (mtest 0.6.0). Each run boots a
+  temporary overlay of the image, so the image is never written to and two runs
+  at once do not meet.
+
+### The runner declaration
+
+A program built for FreeBSD on another host is run in a virtual machine by
+`tools/vm-runner`, which a runner declaration names:
+
+```toml
+[target.x86_64-freebsd]
+runner = ["/path/to/openkal-freebsd/tools/vm-runner", "{}"]
+```
+
+The declaration's `{}` is the built artefact. `vm-runner` boots the FreeBSD
+image that `OKF_VM_IMAGE` names under `qemu-system-x86_64` (KVM where the host
+has it, the software machine otherwise), offers the artefact on a read-only
+drive, runs it as root on the serial console, writes what it writes to the
+standard output and error, answers with its exit status, and shuts the machine
+down; the temporary overlay it booted from is discarded. The disk is the
+FreeBSD 14.5-RELEASE boot disk of the `xim` package `freebsd-disk` (The
+FreeBSD Project's release, installed from the official installer disc;
+published separately), and `qemu-system-x86_64` with `qemu-img` are the
+host's dependencies.
 
 The targets need mcpp 2026.11.10.1 or later.
 
