@@ -1,4 +1,5 @@
 #!/bin/sh
-# The conformance suite's runner on a Linux host: the program, run in the
-# FreeBSD virtual machine whose disk OKF_VM_IMAGE names (tools/vm-run.py).
+# The runner a runner declaration names on a Linux host: the program, run in
+# the FreeBSD virtual machine whose disk OKF_VM_IMAGE names (tools/vm-run.py).
+# The declaration's payload is the first argument, as with any command.
 exec python3 "$(dirname "$0")/vm-run.py" --image "${OKF_VM_IMAGE:?the FreeBSD disk image}" -- "$@"
