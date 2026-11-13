@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- `tools/vm-runner` runs the program by dirun with the image's profile (beside the image, as
+  `freebsd-disk-image` installs it, else `tools/freebsd.toml`); `tools/vm-run.py` is removed.
+- The specification is declared as `^0.25.0` (openkal clause 8): a consumer that names a
+  later patch release resolves with this implementation.
+
 ## 0.1.1
 
 - `tools/vm-run.py` boots each run from a temporary overlay of the image

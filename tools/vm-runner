@@ -1,5 +1,13 @@
 #!/bin/sh
-# The runner a runner declaration names on a Linux host: the program, run in
-# the FreeBSD virtual machine whose disk OKF_VM_IMAGE names (tools/vm-run.py).
-# The declaration's payload is the first argument, as with any command.
-exec python3 "$(dirname "$0")/vm-run.py" --image "${OKF_VM_IMAGE:?the FreeBSD disk image}" -- "$@"
+# The runner a runner declaration names on a Linux or macOS host: the program, run in a FreeBSD
+# virtual machine by dirun. The machine boots the image OKF_VM_IMAGE names (a temporary overlay of
+# it; the image is never written), with the profile beside it (dirun.toml, as the package
+# freebsd-disk-image ships it) or else tools/freebsd.toml. The program is delivered and run from its
+# copy; OPENKAL_* and KAL_* are passed to it, and a test runner's events come back. The run is
+# limited to OKF_VM_TIMEOUT seconds (1800).
+here=$(dirname "$0")
+image=${OKF_VM_IMAGE:?the FreeBSD disk image (the package freebsd-disk-image installs one)}
+profile=$(dirname "$image")/dirun.toml
+[ -f "$profile" ] || profile=$here/freebsd.toml
+exec dirun --image "$image" --profile "$profile" --timeout "${OKF_VM_TIMEOUT:-1800}" \
+    --pass 'OPENKAL_*' --pass 'KAL_*' -- "$@"
