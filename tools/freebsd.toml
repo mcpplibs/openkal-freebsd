@@ -1,0 +1,57 @@
+# How tools/vm-runner boots a FreeBSD 14.5-RELEASE x86_64 image by dirun: the loader's menu is left
+# for its prompt, the console moved to the serial line, root logs in, the files disk is mounted at
+# /mnt/dirun, and a test runner's events come back. It is the profile the package
+# freebsd-disk-image ships beside its image, without the image's name: the image is OKF_VM_IMAGE.
+name = "freebsd-14.5-x86_64"
+
+[machine]
+arch   = "x86_64"
+memory = 1024
+smp    = 2
+
+[[boot]]
+expect  = "Autoboot in"
+send    = " 3"            # any key stops the countdown; 3 leaves the menu for the loader's prompt
+line    = false
+pace    = 300             # the loader polls its console: faster input is dropped
+timeout = 120
+
+[[boot]]
+expect = "OK "
+send   = "set console=comconsole"
+pace   = 50
+
+[[boot]]
+expect = "OK "
+send   = "boot"
+pace   = 50
+
+[[boot]]
+expect  = "login: "
+send    = "root"
+timeout = 300
+
+[[boot]]
+expect   = "Password:"
+send     = "root"
+optional = true
+
+[[boot]]
+expect = "# |\\$ "
+
+[command]
+prepare = ["stty -echo"]
+line    = "echo @@BEGIN@@; {env}{argv} < /dev/null; echo @@STATUS=$?@@"
+env     = "env {assignments} "
+quote   = "posix"
+begin   = "@@BEGIN@@"
+status  = "@@STATUS=(\\d+)@@"
+line-max = 200            # a longer line is written to the files disk and run from there
+script   = "sh {script}"
+
+[files]
+mount = ["mkdir -p /mnt/dirun", "mount -r -t msdosfs /dev/vtbd1s1 /mnt/dirun"]
+at    = "/mnt/dirun"
+
+[relay]
+report = "/tmp/dirun-mtest.ndjson"

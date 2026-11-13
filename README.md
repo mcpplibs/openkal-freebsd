@@ -5,8 +5,23 @@ written on the kernel's own system-call interface.
 
 ```toml
 [target.'cfg(os = "freebsd")'.dependencies]
-openkal-freebsd = "0.1.1"
+openkal-freebsd = "0.1.2"
 ```
+
+## What 0.1.2 changes
+
+**The runner is dirun.** `tools/vm-runner` boots the machine by dirun, the one
+program that runs a command inside a booted disk image, with the image's profile
+(`dirun.toml` beside the image, as the package `freebsd-disk-image` installs it,
+else `tools/freebsd.toml`); `tools/vm-run.py`, a second implementation of the same
+conversation, is removed. What it did is dirun's: the overlay, the program
+delivered on a read-only FAT disk and run from its copy, `OPENKAL_*` and `KAL_*`
+passed, and a test runner's events read back from the machine.
+
+**The specification by its minor version.** The manifest declares `openkal =
+"^0.25.0"`: an implementation written against a patch release conforms to every
+later patch of that minor version (openkal clause 8), and a consumer that names
+openkal 0.25.1 resolves with it.
 
 ## What it is
 
@@ -105,12 +120,11 @@ runs above openkal-musl on the `*-freebsd-musl` rows.
 
 - `tools/defer-runner` puts the suite and the variables it is run with in a
   directory, where CI runs it inside a FreeBSD VM.
-- `tools/vm-run.py` runs a program in a local FreeBSD VM image for development
-  (`OKF_VM_IMAGE`, `tools/vm-runner`). It forwards `OPENKAL_*`, `KAL_*` and the
-  mtest protocol's variables, so the suite can report through mtest once the
-  runner's listing pass honours `--run-under` (mtest 0.6.0). Each run boots a
-  temporary overlay of the image, so the image is never written to and two runs
-  at once do not meet.
+- `tools/vm-runner` runs a program in a local FreeBSD VM image for development
+  (`OKF_VM_IMAGE`), by dirun. It passes `OPENKAL_*` and `KAL_*`, and a test
+  runner's events come back from the machine. Each run boots a temporary overlay
+  of the image, so the image is never written to and two runs at once do not
+  meet.
 
 ### The runner declaration
 
@@ -123,15 +137,18 @@ runner = ["/path/to/openkal-freebsd/tools/vm-runner", "{}"]
 ```
 
 The declaration's `{}` is the built artefact. `vm-runner` boots the FreeBSD
-image that `OKF_VM_IMAGE` names under `qemu-system-x86_64` (KVM where the host
-has it, the software machine otherwise), offers the artefact on a read-only
-drive, runs it as root on the serial console, writes what it writes to the
-standard output and error, answers with its exit status, and shuts the machine
-down; the temporary overlay it booted from is discarded. The disk is the
-FreeBSD 14.5-RELEASE boot disk of the `xim` package `freebsd-disk` (The
-FreeBSD Project's release, installed from the official installer disc;
-published separately), and `qemu-system-x86_64` with `qemu-img` are the
-host's dependencies.
+image that `OKF_VM_IMAGE` names by `dirun` (under `qemu-system-x86_64`, KVM
+where the host has it, the software machine otherwise), delivers the artefact
+on a read-only FAT disk, runs it as root on the serial console, writes what it
+writes to the standard output, and answers with its exit status; the temporary
+overlay it booted from is discarded. The disk is the FreeBSD 14.5-RELEASE boot
+disk of the `xim` package `freebsd-disk-image` (The FreeBSD Project's release,
+installed from the official installer disc), which installs the profile beside
+it; `dirun`, `qemu-system-x86_64` and `qemu-img` are the host's dependencies.
+Without a declaration, mcpp states the same runner for the FreeBSD rows of an
+x86_64 Linux or macOS host itself: `dirun --profile
+{pkg:freebsd-disk-image}/dirun.toml -- {}`, its packages installed by the first
+run.
 
 The targets need mcpp 2026.11.10.1 or later.
 
