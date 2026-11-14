@@ -13,9 +13,11 @@ on:
 
 env:
   # THE ENGINE THAT KNOWS THE TARGET. `x86_64-freebsd' is a row of mcpp
-  # 2026.11.10.1. A run given `mcpp_ref' builds the engine from that branch or
-  # tag, with the released one as the compiler of that build.
-  MCPP_VERSION: 2026.11.10.1
+  # 2026.11.10.1; the run-time the standalone rows build (openkal-llvm-runtime
+  # 0.20.3) requires 2026.11.13.1, and the newest release is named. A run given
+  # `mcpp_ref' builds the engine from that branch or tag, with the released one
+  # as the compiler of that build.
+  MCPP_VERSION: 2026.11.14.1
   MCPP_SOURCE_REF: ${{ github.event.inputs.mcpp_ref || '' }}
   XLINGS_VERSION: v2026.10.26.1
   XLINGS_NON_INTERACTIVE: '1'
