@@ -21,7 +21,7 @@ runtime="${5:-}"
 [ -z "$runtime" ] || runtime="$(cd "$runtime" && pwd)"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
-cp -R "$spec/conformance" "$work/conformance"
+cp -R "$spec/tests/cts" "$work/conformance"
 cp -R "$musl" "$work/musl"
 rm -rf "$work/conformance/target" "$work/musl/target"
 
