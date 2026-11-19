@@ -5,8 +5,25 @@ written on the kernel's own system-call interface.
 
 ```toml
 [target.'cfg(os = "freebsd")'.dependencies]
-openkal-freebsd = "0.1.2"
+openkal-freebsd = "0.2.0"
 ```
+
+## What 0.2 changes (openkal 0.26)
+
+**A start is bounded by the kernel alone** (clause 7.6). This implementation
+kept no bound of its own: both vectors of a start are allocated at their
+measured size, and a started program reads the vectors the kernel gave it where
+they lie. What changes is the report of the kernel's refusal. A start whose
+arguments and environment exceed what the kernel admits (`ARG_MAX`,
+`kern.argmax`) is answered `E2BIG` by `fexecve`, and that is now
+`kal_err_no_space`, where it was `kal_err_io`.
+
+**Observable units are not claimed, as before** (clause 7.18).
+`kal_process_props` does not state `KAL_PROCESS_PROP_JOB_OBSERVE`, and
+`kal_process_job_create` answers `kal_err_not_supported`; openkal 0.26 requires
+the two to agree, and they did.
+
+The manifest declares `openkal = "^0.26.0"`.
 
 ## What 0.1.2 changes
 
