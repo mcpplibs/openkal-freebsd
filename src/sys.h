@@ -32,6 +32,7 @@ constexpr int AT_SYMLINK_NOFOLLOW = 512;
 constexpr int CLOCK_MONOTONIC = 4;
 constexpr int CLOCK_REALTIME = 0;
 constexpr int CTL_KERN = 1;
+constexpr int E2BIG = 7;
 constexpr int EACCES = 13;
 constexpr int EAGAIN = 35;
 constexpr int EBADF = 9;

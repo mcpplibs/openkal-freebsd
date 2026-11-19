@@ -18,6 +18,9 @@ inline int translate(word e) {
         case 0:            return kal_ok;
         case EAGAIN:       return kal_err_again;
         case ENOMEM:       return kal_err_no_memory;
+        // E2BIG: a start whose arguments and environment exceed what the
+        // kernel admits, ARG_MAX (openkal 0.26, clause 7.6).
+        case E2BIG:
         case ENOSPC:
         case EDQUOT:       return kal_err_no_space;
         case EACCES:
